@@ -9,6 +9,6 @@ datasources:
     version: 1
     editable: true
     jsonData:
-      path: '/resources'
+      apiUrl: 'http://host.docker.internal:8080'
     secureJsonData:
-      apiKey: 'api-key'
+      apiToken: 'replace-with-real-token'

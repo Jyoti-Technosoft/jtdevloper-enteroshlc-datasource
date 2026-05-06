@@ -18,6 +18,8 @@ services:
       - 'seccomp:unconfined'
     cap_add:
       - SYS_PTRACE
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../dist:/var/lib/grafana/plugins/jtdevloper-enteroshlc-datasource
       - ../provisioning:/etc/grafana/provisioning

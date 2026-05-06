@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
-    "package": "npm run build && mage -v && rm -f jtdevloper-enteroshlc-datasource.zip && (cd dist && zip -r ../jtdevloper-enteroshlc-datasource.zip .)",
+    "build:backend:docker": "mkdir -p dist && docker run --rm -e GOTOOLCHAIN=auto -v \"$PWD\":/src -w /src golang:1.25.0-bookworm sh -lc \"/usr/local/go/bin/go mod download && GOOS=linux GOARCH=amd64 /usr/local/go/bin/go build -buildvcs=false -o dist/gpx_enteroshlc_linux_amd64 ./pkg && GOOS=linux GOARCH=arm64 /usr/local/go/bin/go build -buildvcs=false -o dist/gpx_enteroshlc_linux_arm64 ./pkg\"",
+    "package": "npm run build && npm run build:backend:docker && rm -f jtdevloper-enteroshlc-datasource.zip && (cd dist && zip -r ../jtdevloper-enteroshlc-datasource.zip .)",
     "dev": "webpack -w -c ./.config/webpack/webpack.config.ts --env development",
     "test": "jest --watch --onlyChanged",
     "test:ci": "jest --passWithNoTests --maxWorkers 4",
