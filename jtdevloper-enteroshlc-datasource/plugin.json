@@ -1,0 +1,38 @@
+{
+    "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+    "type": "datasource",
+    "name": "Enteroshlc",
+    "id": "jtdevloper-enteroshlc-datasource",
+    "metrics": true,
+    "backend": true,
+    "executable": "gpx_enteroshlc",
+    "info": {
+        "description": "Datasource plugin for HLC Grafana APIs",
+        "author": {
+            "name": "Enteros"
+        },
+        "keywords": [
+            "hlc",
+            "database",
+            "anomaly"
+        ],
+        "logos": {
+            "small": "img/logo.svg",
+            "large": "img/logo.svg"
+        },
+        "links": [
+            {
+                "name": "repository",
+                "url": "https://github.com/Jyoti-Technosoft/jtdevloper-enteroshlc-datasource"
+            }
+        ],
+        "screenshots": [],
+        "version": "1.0.0",
+        "updated": "2026-05-06"
+    },
+    "dependencies": {
+        "grafanaDependency": ">=12.3.0",
+        "plugins": []
+    },
+    "buildMode": "production"
+}
