@@ -11,13 +11,14 @@ Hash: SHA512
   ],
   "plugin": "jtdevloper-enteroshlc-datasource",
   "version": "1.0.0",
-  "time": 1778072462838,
+  "time": 1778131665727,
   "keyId": "7e4d0c6a708866e7",
   "files": {
+    "go_plugin_build_manifest": "eb6ba2d4580aa986ad822beddec56c7575d8fa735ece991b63b46ec0fa1ea100",
     "module.js.map": "ca38456ae1a62f94feecc7d0eebef2f629eb379e0310a50de8243beef12830fc",
-    "gpx_enteroshlc_linux_amd64": "a94809ed04bbea3cfaaab292c88bc561291864c53e47771cd41d99e5e397d094",
+    "gpx_enteroshlc_linux_amd64": "88c252327be4bdc7afdbd165217a38d32fffeebe4f97a73a349561bfe93b3b22",
     "plugin.json": "46c6c7484ada109dead85caea0114fcd5bab8f2a8bdd2f93dc7fdcaaf5ed51d6",
-    "gpx_enteroshlc_linux_arm64": "d622e0e1a477f9cb1af41050de0aa6cd8c6fc0822e979435018d6a3ef446b4e2",
+    "gpx_enteroshlc_linux_arm64": "45abcc3333418d1a25d33ce40653de5972926d8afd30b23591e51a480a516350",
     "CHANGELOG.md": "42bc4eaa15787e9fadb08c1a8a51badfada61d0860f7efe9ba51803c2e81b64d",
     "LICENSE": "19b1d1b137848666394b90c78784412610c312ea4935a6fa1e1586d3cb8aa9ef",
     "README.md": "6ac3fdf60acc1788374d2fef896442b15b6ded6ce6c4856106fbfbca2105cf87",
@@ -27,11 +28,11 @@ Hash: SHA512
 }
 -----BEGIN PGP SIGNATURE-----
 
-wsA/BAETCgBtBYJp+zuPCRB+TQxqcIhm50UUAAAAAAAcACBzYWx0QG5vdGF0
-aW9ucy5vcGVucGdwanMub3JnlQQTDjLCBBC+cekYfwLMVEch/M8obLMMoMkn
-pf7eCIYWIQTzOyW2kQdOhGNlcPN+TQxqcIhm5wAAC9kCCQGQQF/gL3KRSpCI
-cSf1bxwHdsHupChqNp2pFAEOl7jk6Dzz6YnMFxx1zyCOsmGQb5/H7t5TAVlD
-GqZZe7NIPdsS8gIJAaWPHigFCuFMElDQBmNiQ7FQpTf/xrdtwbwfs9WsTnzc
-DWUcEFfzfLaonMCvJMgQbdggSOxARk2DHNfcoanNnn53
-=r+2E
+wsA9BAETCgBtBYJp/CLRCRB+TQxqcIhm50UUAAAAAAAcACBzYWx0QG5vdGF0
+aW9ucy5vcGVucGdwanMub3JntUNi4FS6sJDQo1zTfUCjEb3oyVOttrt1m69T
+GMM5BrwWIQTzOyW2kQdOhGNlcPN+TQxqcIhm5wAAW9UCBiBryZAvNyRMKRUV
+iJrRlIMUhj/Hi0advXp8O6BVDVT8+vD3M3SsCT3qHNPH45PBGyS0X9GAiEBj
+VdU9Q50jgcXwAgiXdHZPsEOsw2Y6PLTLxgtYwUdoN9TxQ+YfUrYC8ICvb4ON
+Y4sBMIOUvbC19RmeXhADnHmcxZPWOgjgmJPIuWENHw==
+=p3N6
 -----END PGP SIGNATURE-----
