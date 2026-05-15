@@ -40,17 +40,50 @@ func NewDatasource(_ context.Context, _ backend.DataSourceInstanceSettings) (ins
 type Datasource struct{}
 
 type queryModel struct {
+	QueryType   string `json:"queryType,omitempty"`
 	Target      string `json:"target"`
 	Capture     string `json:"capture"`
 	Metric      string `json:"metric"`
 	Measurement string `json:"measurement"`
 	SpikeOnly   bool   `json:"spikeOnly"`
+
+	// Heatmap-mode fields. Active only when QueryType == "heatmap".
+	// Two sub-modes are supported:
+	//   1. Adhoc (preferred): TargetNames / UseDefaultConfig / SpikeDetectionReportName /
+	//      StaticTemplateName / AnomalyMagnitude - mirrors the GATE "Add Dashlet" wizard
+	//      and is evaluated by the backend against POST /heatmap/adhoc.
+	//   2. Legacy: DashletIds - picks an existing persisted GATE heatmap dashlet and
+	//      evaluates via POST /heatmap (kept for backward compatibility).
+	DashletIds               []int64  `json:"dashletIds,omitempty"`
+	MillisAgo                int64    `json:"millisAgo,omitempty"`
+	TargetNames              []string `json:"targetNames,omitempty"`
+	UseDefaultConfig         *bool    `json:"useDefaultConfig,omitempty"`
+	SpikeDetectionReportName string   `json:"spikeDetectionReportName,omitempty"`
+	StaticTemplateName       string   `json:"staticTemplateName,omitempty"`
+	AnomalyMagnitude         float64  `json:"anomalyMagnitude,omitempty"`
 }
 
 type grafanaSeries struct {
-	Target     string          `json:"target"`
-	Datapoints [][]float64     `json:"datapoints"`
-	Tags       map[string]any  `json:"tags,omitempty"`
+	Target     string         `json:"target"`
+	Datapoints [][]float64    `json:"datapoints"`
+	Tags       map[string]any `json:"tags,omitempty"`
+}
+
+// Wire shapes returned by POST /grafana/heatmap.
+type heatmapSeries struct {
+	Target          string            `json:"target"`
+	TargetAlias     string            `json:"targetAlias"`
+	IsTargetRunning bool              `json:"isTargetRunning"`
+	Datapoints      [][]float64       `json:"datapoints"`
+	Tags            map[string]string `json:"tags,omitempty"`
+}
+
+type heatmapResponse struct {
+	Series             []heatmapSeries `json:"series"`
+	TemplateNames      []string        `json:"templateNames"`
+	DeletedTargetNames []string        `json:"deletedTargetNames"`
+	GeneratedAt        int64           `json:"generatedAt"`
+	Cached             bool            `json:"cached"`
 }
 
 type backendClient struct {
@@ -89,6 +122,10 @@ func (d *Datasource) query(ctx context.Context, client *backendClient, query bac
 	var q queryModel
 	if err := json.Unmarshal(query.JSON, &q); err != nil {
 		return backend.ErrDataResponse(backend.StatusBadRequest, "invalid query payload")
+	}
+
+	if strings.EqualFold(strings.TrimSpace(q.QueryType), "heatmap") {
+		return d.heatmapQuery(ctx, client, query, q)
 	}
 
 	if strings.TrimSpace(q.Target) == "" || strings.TrimSpace(q.Capture) == "" || strings.TrimSpace(q.Metric) == "" {
@@ -140,6 +177,122 @@ func (d *Datasource) query(ctx context.Context, client *backendClient, query bac
 	return backend.DataResponse{Frames: frames}
 }
 
+// heatmapQuery executes a heatmap-mode query and converts each per-target
+// series into a Grafana DataFrame. The frame layout (`Time`, `Value`) is
+// intentionally generic so it renders correctly under both the `heatmap` and
+// `timeseries` panel visualizations.
+//
+// The exact upstream endpoint is picked from the QueryEditor's mode:
+//   - "Create new heatmap" (target names supplied) -> POST /heatmap/adhoc
+//   - "Use existing dashlet" (dashlet IDs supplied) -> POST /heatmap
+//
+// If both are present (corrupted query JSON), the ad-hoc path wins because
+// it represents the more recent UI selection.
+func (d *Datasource) heatmapQuery(ctx context.Context, client *backendClient, dq backend.DataQuery, q queryModel) backend.DataResponse {
+	hasTargets := len(q.TargetNames) > 0
+	hasDashlets := len(q.DashletIds) > 0
+	if !hasTargets && !hasDashlets {
+		return backend.DataResponse{Frames: data.Frames{}}
+	}
+
+	// Forward the panel's time picker to the backend so the result aligns
+	// with what the user is looking at. millisAgo is kept as a fallback for
+	// older callers / explicit overrides via the QueryEditor "Look-back" field.
+	var rangeFrom, rangeTo int64
+	if dq.TimeRange.From.Unix() > 0 && dq.TimeRange.To.Unix() > 0 {
+		rangeFrom = dq.TimeRange.From.UnixMilli()
+		rangeTo = dq.TimeRange.To.UnixMilli()
+	}
+	millisAgo := q.MillisAgo
+	if millisAgo <= 0 && rangeFrom > 0 && rangeTo > rangeFrom {
+		millisAgo = rangeTo - rangeFrom
+	}
+
+	var (
+		path    string
+		payload map[string]any
+	)
+	if hasTargets {
+		path = "/heatmap/adhoc"
+		// Default useDefaultConfig=true matches the GATE wizard default. We
+		// dereference the pointer here so callers can leave the field unset.
+		useDefaultConfig := true
+		if q.UseDefaultConfig != nil {
+			useDefaultConfig = *q.UseDefaultConfig
+		}
+		anomalyMagnitude := q.AnomalyMagnitude
+		if anomalyMagnitude == 0 {
+			anomalyMagnitude = 1.5
+		}
+		payload = map[string]any{
+			"targetNames":              q.TargetNames,
+			"useDefaultConfig":         useDefaultConfig,
+			"spikeDetectionReportName": q.SpikeDetectionReportName,
+			"staticTemplateName":       q.StaticTemplateName,
+			"anomalyMagnitude":         anomalyMagnitude,
+		}
+	} else {
+		path = "/heatmap"
+		payload = map[string]any{"dashletIds": q.DashletIds}
+	}
+	if rangeFrom > 0 && rangeTo > rangeFrom {
+		payload["rangeFrom"] = rangeFrom
+		payload["rangeTo"] = rangeTo
+	}
+	if millisAgo > 0 {
+		payload["millisAgo"] = millisAgo
+	}
+
+	body, err := client.post(ctx, path, payload)
+	if err != nil {
+		return backend.ErrDataResponse(backend.StatusInternal, err.Error())
+	}
+
+	var response heatmapResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return backend.ErrDataResponse(backend.StatusInternal, "invalid heatmap response")
+	}
+
+	frames := make(data.Frames, 0, len(response.Series))
+	for _, series := range response.Series {
+		times := make([]time.Time, 0, len(series.Datapoints))
+		values := make([]float64, 0, len(series.Datapoints))
+		for _, point := range series.Datapoints {
+			if len(point) < 2 {
+				continue
+			}
+			values = append(values, point[0])
+			times = append(times, time.UnixMilli(int64(point[1])))
+		}
+		seriesName := series.TargetAlias
+		if strings.TrimSpace(seriesName) == "" {
+			seriesName = series.Target
+		}
+		frame := data.NewFrame(seriesName,
+			data.NewField("Time", nil, times),
+			data.NewField(seriesName, nil, values),
+		)
+		// Tag the frame as a time-series so Grafana's Heatmap panel can bucket
+		// it into cells when "Calculate from data" is set to Yes. Custom keys
+		// surface diagnostic metadata for tooltips/Inspect.
+		frame.Meta = &data.FrameMeta{
+			Type:                   data.FrameTypeTimeSeriesMulti,
+			PreferredVisualization: data.VisType("heatmap"),
+			Custom: map[string]any{
+				"target":          series.Target,
+				"targetAlias":     series.TargetAlias,
+				"isTargetRunning": series.IsTargetRunning,
+				"cached":          response.Cached,
+				"generatedAt":     response.GeneratedAt,
+				"tags":            series.Tags,
+			},
+		}
+		frames = append(frames, frame)
+	}
+
+	return backend.DataResponse{Frames: frames}
+}
+
 // CheckHealth handles health checks sent from Grafana to the plugin.
 // The main use case for these health checks is the test button on the
 // datasource configuration page which allows users to verify that
@@ -178,17 +331,27 @@ func (d *Datasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRe
 func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
 	client, err := newBackendClient(req.PluginContext.DataSourceInstanceSettings)
 	if err != nil {
-		return sender.Send(&backend.CallResourceResponse{Status: http.StatusBadRequest, Body: []byte(err.Error())})
+		return sender.Send(&backend.CallResourceResponse{
+			Status:  http.StatusBadRequest,
+			Headers: jsonHeaders(),
+			Body:    jsonErrorBody(err.Error()),
+		})
 	}
 
-	path := strings.TrimPrefix(req.Path, "/")
+	// Normalise the path: strip both leading/trailing slashes so we accept
+	// "heatmap/dashlets", "/heatmap/dashlets" and "heatmap/dashlets/" alike.
+	path := strings.Trim(req.Path, "/")
 	switch {
 	case path == "health":
 		body, postErr := client.post(ctx, "/health", map[string]any{})
 		if postErr != nil {
-			return sender.Send(&backend.CallResourceResponse{Status: http.StatusBadGateway, Body: []byte(postErr.Error())})
+			return sender.Send(&backend.CallResourceResponse{
+				Status:  http.StatusBadGateway,
+				Headers: jsonHeaders(),
+				Body:    jsonErrorBody(postErr.Error()),
+			})
 		}
-		return sender.Send(&backend.CallResourceResponse{Status: http.StatusOK, Body: body})
+		return sender.Send(&backend.CallResourceResponse{Status: http.StatusOK, Headers: jsonHeaders(), Body: body})
 	case strings.HasPrefix(path, "variables/"):
 		variable := strings.TrimPrefix(path, "variables/")
 		var payload map[string]any
@@ -200,12 +363,53 @@ func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResource
 		}
 		body, postErr := client.post(ctx, "/variables/"+url.PathEscape(variable), payload)
 		if postErr != nil {
-			return sender.Send(&backend.CallResourceResponse{Status: http.StatusBadGateway, Body: []byte(postErr.Error())})
+			return sender.Send(&backend.CallResourceResponse{
+				Status:  http.StatusBadGateway,
+				Headers: jsonHeaders(),
+				Body:    jsonErrorBody(postErr.Error()),
+			})
 		}
-		return sender.Send(&backend.CallResourceResponse{Status: http.StatusOK, Body: body})
+		return sender.Send(&backend.CallResourceResponse{Status: http.StatusOK, Headers: jsonHeaders(), Body: body})
+	case path == "heatmap/dashlets" ||
+		path == "heatmap/reports" ||
+		path == "heatmap/templates" ||
+		path == "heatmap/targets":
+		// All four endpoints are simple GETs under /grafana/heatmap/* and are
+		// listed explicitly so unrelated future paths still fall through to
+		// the 404 handler. The upstream path is just the request path with a
+		// leading slash; the Java backend uses identical names.
+		body, getErr := client.get(ctx, "/"+path)
+		if getErr != nil {
+			return sender.Send(&backend.CallResourceResponse{
+				Status:  http.StatusBadGateway,
+				Headers: jsonHeaders(),
+				Body:    jsonErrorBody(getErr.Error()),
+			})
+		}
+		return sender.Send(&backend.CallResourceResponse{Status: http.StatusOK, Headers: jsonHeaders(), Body: body})
 	default:
-		return sender.Send(&backend.CallResourceResponse{Status: http.StatusNotFound, Body: []byte("resource not found")})
+		// Returning a JSON body keeps getBackendSrv().get()/post() happy: it
+		// always parses the response as JSON and would otherwise blow up with
+		// "Unexpected token 'r', 'resource not found' is not valid JSON".
+		log.DefaultLogger.Warn("HLC datasource: unknown resource path", "path", req.Path, "method", req.Method)
+		return sender.Send(&backend.CallResourceResponse{
+			Status:  http.StatusNotFound,
+			Headers: jsonHeaders(),
+			Body:    jsonErrorBody("resource not found: " + req.Path),
+		})
 	}
+}
+
+func jsonHeaders() map[string][]string {
+	return map[string][]string{"Content-Type": {"application/json"}}
+}
+
+func jsonErrorBody(message string) []byte {
+	body, err := json.Marshal(map[string]string{"error": message})
+	if err != nil {
+		return []byte(`{"error":"internal error"}`)
+	}
+	return body
 }
 
 func newBackendClient(settings *backend.DataSourceInstanceSettings) (*backendClient, error) {
@@ -242,6 +446,18 @@ func (c *backendClient) post(ctx context.Context, path string, payload any) ([]b
 		return nil, fmt.Errorf("failed to build request")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return c.do(req)
+}
+
+func (c *backendClient) get(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build request")
+	}
+	return c.do(req)
+}
+
+func (c *backendClient) do(req *http.Request) ([]byte, error) {
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
